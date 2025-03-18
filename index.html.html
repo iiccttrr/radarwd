@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>رادار وادي الدواسر - مباشر</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: black;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            direction: rtl;
+        }
+
+        #map {
+            width: 100%;
+            height: 100vh;
+        }
+
+        /* زر القائمة الصغيرة */
+        .menu-button {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 8px;
+            font-size: 16px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            z-index: 1100;
+        }
+
+        /* قائمة التحكم */
+        .control-panel {
+            position: fixed;
+            top: 50px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 8px;
+            border-radius: 8px;
+            z-index: 1000;
+            display: none;
+        }
+
+        .small-btn {
+            background: rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 5px;
+            font-size: 12px;
+            border-radius: 5px;
+            border: none;
+            cursor: pointer;
+            display: block;
+            margin: 5px 0;
+        }
+
+        .control-group {
+            display: none;
+            background: rgba(34, 34, 34, 0.9);
+            padding: 10px;
+            border-radius: 10px;
+            font-size: 14px;
+            color: white;
+            text-align: center;
+            margin-top: 5px;
+        }
+
+        input[type="range"] {
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- زر القائمة الصغيرة -->
+<button class="menu-button" onclick="toggleMenu()">⚙️</button>
+
+<!-- قائمة التحكم -->
+<div class="control-panel" id="controlMenu">
+    <button class="small-btn" onclick="toggleControl('opacityControl')">🌫️ تحكم الطبقات</button>
+    <button class="small-btn" onclick="toggleControl('alignmentControl')">📍 محاذاة الطبقة</button>
+    <button class="small-btn" onclick="updateRadar()">🔄 تحديث الرادار</button>
+    <button class="small-btn" onclick="toggleControl('rainMotionControl')">☁️ تحريك السحب</button>
+
+    <div id="opacityControl" class="control-group">
+        <label>شفافية الطبقة الخضراء:</label>
+        <input type="range" id="greenOpacitySlider" min="0" max="1" step="0.1" value="1" oninput="changeGreenOpacity()">
+        <br>
+        <label>شفافية طبقة أسماء المدن:</label>
+        <input type="range" id="cityOpacitySlider" min="0" max="1" step="0.1" value="1" oninput="changeCityOpacity()">
+    </div>
+
+    <div id="alignmentControl" class="control-group">
+        <label>محاذاة الطبقة الخضراء بدقة:</label>
+        <button class="small-btn" onclick="moveLayer(0.01, 0)">⬆️</button>
+        <button class="small-btn" onclick="moveLayer(0, -0.01)">⬅️</button>
+        <button class="small-btn" onclick="moveLayer(0, 0.01)">➡️</button>
+        <button class="small-btn" onclick="moveLayer(-0.01, 0)">⬇️</button>
+        <button class="small-btn" onclick="resetAlignment()">🔄 إعادة ضبط</button>
+    </div>
+
+    <div id="rainMotionControl" class="control-group">
+        <label>تحريك السحب لآخر 20 تحديث:</label>
+        <button class="small-btn" onclick="toggleRainAnimation()">▶️ تشغيل / ⏸️ إيقاف</button>
+    </div>
+</div>
+
+<script>
+    function toggleMenu() {
+        var menu = document.getElementById("controlMenu");
+        menu.style.display = (menu.style.display === "none") ? "block" : "none";
+    }
+
+    function toggleControl(id) {
+        var control = document.getElementById(id);
+        control.style.display = (control.style.display === "none") ? "block" : "none";
+    }
+
+    var map = L.map('map', {
+        center: [20.4788332, 44.8185541],
+        zoom: 7,
+        zoomControl: true
+    });
+
+    var satelliteLayer = L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+        subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+        attribution: '© Google Satellite'
+    }).addTo(map);
+
+    var greenBounds = [
+        [23.2, 41.8],  
+        [17.8, 47.8]   
+    ];
+
+    var greenRadarLayer = L.imageOverlay("https://up6.cc/2025/03/17422518302561.gif", greenBounds, { opacity: 1 }).addTo(map);
+    var cityNamesLayer = L.imageOverlay("https://dso2.raed.net:454/files/IMG-8520_c6a69.png", greenBounds, { opacity: 1 }).addTo(map);
+
+    function changeGreenOpacity() {
+        var opacityValue = document.getElementById("greenOpacitySlider").value;
+        greenRadarLayer.setOpacity(opacityValue);
+    }
+
+    function changeCityOpacity() {
+        var opacityValue = document.getElementById("cityOpacitySlider").value;
+        cityNamesLayer.setOpacity(opacityValue);
+    }
+
+    var radarFrames = [];
+    var radarIndex = 0;
+    var radarLayer;
+    var radarAnimation;
+
+    function updateRadar() {
+        fetch("https://api.rainviewer.com/public/weather-maps.json")
+            .then(response => response.json())
+            .then(data => {
+                radarFrames = data.radar.past.map(entry => entry.path);
+                playRainAnimation();
+            });
+    }
+
+    function playRainAnimation() {
+        if (radarLayer) map.removeLayer(radarLayer);
+        radarLayer = L.tileLayer(`https://tilecache.rainviewer.com${radarFrames[radarIndex]}/256/{z}/{x}/{y}/4/1_1.png`, {
+            opacity: 0.7,
+            zIndex: 500
+        }).addTo(map);
+
+        radarIndex = (radarIndex + 1) % radarFrames.length;
+    }
+
+    function toggleRainAnimation() {
+        if (radarAnimation) {
+            clearInterval(radarAnimation);
+            radarAnimation = null;
+        } else {
+            radarAnimation = setInterval(playRainAnimation, 1000);
+        }
+    }
+
+    updateRadar();
+</script>
+
+</body>
+</html>
